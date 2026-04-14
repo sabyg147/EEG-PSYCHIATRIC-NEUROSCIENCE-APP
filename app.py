@@ -20,9 +20,11 @@ import datetime
 import os
 import hashlib
 from groq import Groq
+from dotenv import load_dotenv
 
-os.environ["GROQ_API_KEY"] = os.getenv("GROQ_API_KEY")
-groq_client = Groq(api_key=GROQ_API_KEY)
+load_dotenv()
+
+groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 DB_NAME = "neuroscan.db"
 
