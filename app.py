@@ -26,6 +26,46 @@ groq_client = Groq(api_key=os.getenv("GROQ_API_KEY", "dummy_key"))
 
 DB_NAME = "neuroscan.db"
 
+FULL_MODEL = None
+FULL_SCALER = None
+FULL_SELECTOR = None
+FULL_FEATURES = None
+CLASSES = None
+THRESHOLD = None
+
+BIO_MODEL = None
+BIO_SCALER = None
+BIO_FEATS = None
+BIO_RANGES = None
+
+def load_xgboost_pipeline():
+    global FULL_MODEL, FULL_SCALER, FULL_SELECTOR, FULL_FEATURES, CLASSES, THRESHOLD
+    if FULL_MODEL is not None: return
+    try:
+        full_pl       = joblib.load("eeg_xgboost_pipeline.pkl")
+        FULL_MODEL    = full_pl["model"]
+        FULL_SCALER   = full_pl["scaler"]
+        FULL_SELECTOR = full_pl["selector"]
+        FULL_FEATURES = full_pl["feature_names"]
+        CLASSES       = full_pl["classes"]
+        THRESHOLD     = full_pl.get("threshold", 0.50)
+        print("[LAZY LOAD] XGBoost pipeline loaded successfully.", flush=True)
+    except Exception as e:
+        print(f"[LAZY LOAD ERROR] XGBoost: {e}", flush=True)
+
+def load_bio_pipeline():
+    global BIO_MODEL, BIO_SCALER, BIO_FEATS, BIO_RANGES
+    if BIO_MODEL is not None: return
+    try:
+        bio_pl     = joblib.load("eeg_biomarker_manual_pipeline.pkl")
+        BIO_MODEL  = bio_pl["model"]
+        BIO_SCALER = bio_pl["scaler"]
+        BIO_FEATS  = bio_pl["features"]
+        BIO_RANGES = bio_pl["ranges"]
+        print("[LAZY LOAD] Biomarker pipeline loaded successfully.", flush=True)
+    except Exception as e:
+        print(f"[LAZY LOAD ERROR] Biomarker: {e}", flush=True)
+
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
@@ -86,32 +126,6 @@ app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-
-SAVE = "./"
-
-try:
-    full_pl       = joblib.load(SAVE + "eeg_xgboost_pipeline.pkl")
-    FULL_MODEL    = full_pl["model"]
-    FULL_SCALER   = full_pl["scaler"]
-    FULL_SELECTOR = full_pl["selector"]
-    FULL_FEATURES = full_pl["feature_names"]
-    CLASSES       = full_pl["classes"]
-    THRESHOLD     = full_pl.get("threshold", 0.50)
-    print("[STARTUP] XGBoost pipeline loaded OK")
-except Exception as e:
-    print(f"[STARTUP ERROR] XGBoost: {e}")
-    FULL_MODEL = None
-
-try:
-    bio_pl    = joblib.load(SAVE + "eeg_biomarker_manual_pipeline.pkl")
-    BIO_MODEL  = bio_pl["model"]
-    BIO_SCALER = bio_pl["scaler"]
-    BIO_FEATS  = bio_pl["features"]
-    BIO_RANGES = bio_pl["ranges"]
-    print("[STARTUP] Biomarker pipeline loaded OK")
-except Exception as e:
-    print(f"[STARTUP ERROR] Biomarker: {e}")
-    BIO_MODEL = None
 
 class BiomarkerInput(BaseModel):
     faa:         float = Field(..., description="Frontal Alpha Asymmetry")
@@ -183,14 +197,16 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return JSONResponse({"status": "ok", "full_model": FULL_MODEL is not None, "bio_model": BIO_MODEL is not None, "classes": CLASSES, "version": "2.0.0"})
+    return JSONResponse({"status": "ok", "version": "2.0.0"})
 
 @app.get("/classes")
 async def get_classes():
+    load_xgboost_pipeline()
     return JSONResponse({"classes": CLASSES})
 
 @app.get("/biomarker-ranges")
 async def get_ranges():
+    load_bio_pipeline()
     return JSONResponse({"ranges": BIO_RANGES, "features": BIO_FEATS})
 
 def hash_pass(pwd):
@@ -262,8 +278,9 @@ def chat(data: ChatInput):
 @app.post("/predict-csv")
 @limiter.limit("10/minute")
 async def predict_csv(request: Request, file: UploadFile = File(...)):
+    load_xgboost_pipeline()
     if FULL_MODEL is None:
-        raise HTTPException(503, "Full model not loaded.")
+        raise HTTPException(503, "Full model failed to load internally.")
     if not file.filename.endswith(".csv"):
         raise HTTPException(400, "Only .csv files are accepted.")
     
@@ -307,8 +324,9 @@ async def predict_csv(request: Request, file: UploadFile = File(...)):
 
 @app.post("/predict-biomarker", response_model=PredictionResponse)
 async def predict_biomarker(data: BiomarkerInput):
+    load_bio_pipeline()
     if BIO_MODEL is None:
-        raise HTTPException(503, "Biomarker model not loaded.")
+        raise HTTPException(503, "Biomarker model failed to load internally.")
     try:
         raw = np.array([[data.faa, data.theta_alpha, data.beta_alpha, data.delta_asym]])
         raw[0, 1] = np.log1p(abs(raw[0, 1]))
