@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>NeuroScan — Advanced EEG Diagnosis</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+:root {
+  --bg: #030509;
+  --panel: #0a0e17;
+  --card: #111827;
+  --primary: #8b5cf6;
+  --primary-glow: rgba(139, 92, 246, 0.5);
+  --cyan: #06b6d4;
+  --cyan-glow: rgba(6, 182, 212, 0.5);
+  --emerald: #10b981;
+  --rose: #f43f5e;
+  --border: rgba(255, 255, 255, 0.08);
+  --text: #f8fafc;
+  --muted: #94a3b8;
+  --font-sans: 'Outfit', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: var(--font-sans); background: var(--bg); color: var(--text); min-height: 100vh; overflow-x: hidden; }
+
+/* Background Neon Effects */
+.bg-glow { position: fixed; width: 600px; height: 600px; border-radius: 50%; filter: blur(120px); z-index: 0; pointer-events: none; }
+.glow-1 { top: -200px; left: -100px; background: rgba(139, 92, 246, 0.15); animation: float 15s infinite alternate; }
+.glow-2 { bottom: -200px; right: -100px; background: rgba(6, 182, 212, 0.1); animation: float 20s infinite alternate-reverse; }
+@keyframes float { 0% { transform: translate(0, 0); } 100% { transform: translate(100px, 50px); } }
+
+/* App Layout */
+#app { display: none; height: 100vh; }
+.sidebar { width: 260px; background: rgba(10, 14, 23, 0.8); backdrop-filter: blur(20px); border-right: 1px solid var(--border); padding: 2rem 1.5rem; display: flex; flex-direction: column; z-index: 10; }
+.brand { display: flex; align-items: center; gap: 12px; margin-bottom: 3rem; }
+.brand-icon { width: 40px; height: 40px; border-radius: 12px; background: linear-gradient(135deg, var(--primary), var(--cyan)); display: grid; place-items: center; box-shadow: 0 0 20px var(--primary-glow); }
+.brand-text h2 { font-size: 1.2rem; font-weight: 800; letter-spacing: 0.05em; }
+.brand-text span { font-size: 0.7rem; color: var(--cyan); text-transform: uppercase; letter-spacing: 0.2em; }
+.nav { display: flex; flex-direction: column; gap: 0.5rem; flex: 1; }
+.nav-item { padding: 12px 16px; border-radius: 12px; cursor: pointer; transition: all 0.3s; color: var(--muted); font-weight: 500; display: flex; align-items: center; gap: 12px; }
+.nav-item:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+.nav-item.active { background: linear-gradient(90deg, rgba(139,92,246,0.15), transparent); color: var(--cyan); border-left: 3px solid var(--cyan); border-radius: 0 12px 12px 0; }
+.user-profile { margin-top: auto; padding: 1rem; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+.avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--card); border: 1px solid var(--cyan); display: grid; place-items: center; }
+
+main { flex: 1; height: 100vh; overflow-y: auto; padding: 3rem 4rem; position: relative; z-index: 1; overflow-x: hidden; }
+.view { display: none; animation: slideIn 0.5s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.view.active { display: block; }
+@keyframes slideIn { from { opacity: 0; transform: translateX(60px); } to { opacity: 1; transform: translateX(0); } }
+
+h1.view-title { font-size: 2.5rem; font-weight: 700; margin-bottom: 2rem; background: linear-gradient(135deg, #fff, var(--cyan)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+
+/* Auth Screen */
+#auth-screen { position: fixed; inset: 0; background: var(--bg); display: flex; justify-content: center; align-items: center; z-index: 100; }
+.auth-card { background: var(--panel); border: 1px solid var(--border); padding: 3rem; border-radius: 24px; width: 100%; max-width: 400px; text-align: center; position: relative; box-shadow: 0 20px 40px rgba(0,0,0,0.5), 0 0 0 1px inset rgba(255,255,255,0.05); }
+.auth-card::before { content:''; position:absolute; inset:-1px; border-radius:25px; background: linear-gradient(45deg, var(--primary), var(--cyan)); z-index:-1; filter:blur(4px); opacity:0.5; }
+.auth-input { width: 100%; padding: 14px 16px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; color: var(--text); font-family: var(--font-sans); margin-bottom: 1rem; outline: none; transition: border 0.3s; }
+.auth-input:focus { border-color: var(--cyan); box-shadow: 0 0 15px var(--cyan-glow); }
+.btn { width: 100%; padding: 14px; border: none; border-radius: 12px; font-family: var(--font-sans); font-weight: 700; font-size: 1rem; cursor: pointer; transition: all 0.3s; background: linear-gradient(135deg, var(--primary), var(--cyan)); color: white; box-shadow: 0 4px 15px var(--primary-glow); }
+.btn:hover { transform: translateY(-2px); box-shadow: 0 8px 25px var(--primary-glow); }
+
+/* Dashboard Cards */
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; margin-bottom: 2rem; }
+.stat-card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 1.5rem; position: relative; overflow: hidden; }
+.stat-card::after { content: ''; position: absolute; top:0; left:0; width:100%; height:2px; background: linear-gradient(90deg, var(--primary), var(--cyan)); }
+.stat-val { font-size: 2.5rem; font-weight: 800; margin-top: 0.5rem; color: var(--text); font-family: var(--font-mono); }
+.chart-container { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 1.5rem; height: 350px; margin-bottom: 2rem; }
+.user-table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 16px; overflow: hidden; }
+.user-table th { background: rgba(255,255,255,0.03); padding: 12px; text-align: left; font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; }
+.user-table td { padding: 16px 12px; border-bottom: 1px solid var(--border); font-size: 0.9rem; }
+.badge { padding: 4px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
+.badge.Healthy { background: rgba(16,185,129,0.1); color: var(--emerald); border: 1px solid rgba(16,185,129,0.2); }
+.badge.Mood { background: rgba(244,63,94,0.1); color: var(--rose); border: 1px solid rgba(244,63,94,0.2); }
+
+/* EEG Predictor */
+.upload-zone { border: 2px dashed var(--primary); border-radius: 16px; padding: 4rem; text-align: center; cursor: pointer; transition: all 0.3s; background: rgba(139,92,246,0.05); position: relative; }
+.upload-zone:hover { background: rgba(139,92,246,0.1); border-color: var(--cyan); }
+.sliders-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 2rem; }
+.slider-item { background: var(--panel); padding: 1.5rem; border-radius: 16px; border: 1px solid var(--border); }
+input[type=range] { width: 100%; accent-color: var(--cyan); margin-top: 1rem; }
+
+/* Chatbot */
+.chat-container { display: flex; flex-direction: column; height: 60vh; background: var(--panel); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+.chat-box { flex: 1; padding: 1.5rem; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem; }
+.chat-msg { max-width: 80%; padding: 1rem; border-radius: 16px; line-height: 1.5; font-size: 0.95rem; }
+.chat-user { align-self: flex-end; background: var(--primary); color: white; border-bottom-right-radius: 4px; }
+.chat-ai { align-self: flex-start; background: var(--card); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+.chat-input-area { display: flex; padding: 1rem; border-top: 1px solid var(--border); background: var(--card); }
+.chat-input-area input { flex: 1; background: transparent; border: none; color: white; outline: none; padding: 0.5rem; font-family: var(--font-sans); }
+
+/* Cost & ML pages */
+.info-card { background: var(--panel); padding: 2rem; border-radius: 16px; border: 1px solid var(--border); margin-bottom: 1.5rem; }
+</style>
+</head>
+<body>
+<div class="bg-glow glow-1"></div><div class="bg-glow glow-2"></div>
+
+<!-- Auth Screen -->
+<div id="auth-screen">
+  <div class="auth-card">
+    <div style="font-size:3rem;margin-bottom:1rem">🧠</div>
+    <h2 style="margin-bottom:0.5rem">NeuroScan Access</h2>
+    <p style="color:var(--muted);margin-bottom:2rem;font-size:0.9rem">Login or create an account</p>
+    <input type="text" id="username" class="auth-input" placeholder="Username (e.g., jake)"/>
+    <input type="password" id="password" class="auth-input" placeholder="Password"/>
+    <div style="display:flex;gap:10px;">
+      <button class="btn" onclick="login()" style="background:var(--card);border:1px solid var(--cyan);color:var(--cyan);box-shadow:none">Log In</button>
+      <button class="btn" onclick="register()">Sign Up</button>
+    </div>
+    <div id="auth-err" style="color:var(--rose);margin-top:1rem;font-size:0.85rem"></div>
+  </div>
+</div>
+
+<!-- Main App -->
+<div id="app" style="display:flex">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-icon">🧠</div>
+      <div class="brand-text"><h2>NEUROSCAN</h2><span>Clinical System</span></div>
+    </div>
+    <nav class="nav">
+      <div class="nav-item active" onclick="nav('home')">🏠 Overview</div>
+      <div class="nav-item" onclick="nav('dashboard')">📊 Dashboard & Users</div>
+      <div class="nav-item" onclick="nav('eeg')">📡 EEG Predictor</div>
+      <div class="nav-item" onclick="nav('chat')">🤖 AI Psychiatrist</div>
+      <div class="nav-item" onclick="nav('cost')">💳 Therapy Cost</div>
+      <div class="nav-item" onclick="nav('ml')">🔬 ML Concepts</div>
+      <div class="nav-item" onclick="nav('research')">🧬 Clinical Research</div>
+      <div class="nav-item" onclick="nav('doctors')">👨‍⚕️ Book Therapist</div>
+    </nav>
+    <div class="user-profile">
+      <div class="avatar">👤</div>
+      <div>
+        <div style="font-size:0.9rem;font-weight:600" id="userNameLabel">User</div>
+        <div style="font-size:0.75rem;color:var(--emerald)">● Online</div>
+      </div>
+    </div>
+  </aside>
+
+  <main>
+    <!-- View: Home -->
+    <div id="view-home" class="view active">
+      <div style="display:flex;align-items:center;height:100%">
+        <div style="flex:1; z-index: 2; pointer-events: none;">
+          <h1 style="font-size:4rem;line-height:1.1;margin-bottom:1.5rem;background:linear-gradient(135deg,#fff,var(--cyan),var(--primary));-webkit-background-clip:text;-webkit-text-fill-color:transparent;">Decoding the Mind<br>with AI & EEG</h1>
+          <p style="font-size:1.2rem;color:var(--muted);max-width:600px;margin-bottom:2.5rem;line-height:1.6">NeuroScan is an advanced clinical tool that uses XGBoost and Biomarker extraction to detect Psychiatric limits with 80.82% accuracy. Analyze brain waves instantly.</p>
+          <button class="btn" style="width:auto;padding:16px 32px; pointer-events: auto;" onclick="nav('eeg')">Start Analysis →</button>
+        </div>
+        <div id="three-container" style="position:absolute; inset:0; z-index:1; opacity:0.8;"></div>
+      </div>
+    </div>
+
+    <!-- View: Dashboard -->
+    <div id="view-dashboard" class="view">
+      <h1 class="view-title">System Dashboard</h1>
+      <div class="grid-3">
+        <div class="stat-card">
+          <div style="color:var(--muted);font-size:0.85rem;text-transform:uppercase">Total Scans</div>
+          <div class="stat-val" id="stat-scans">24</div>
+        </div>
+        <div class="stat-card">
+          <div style="color:var(--muted);font-size:0.85rem;text-transform:uppercase">System Status</div>
+          <div class="stat-val" style="color:var(--emerald);font-size:2rem;margin-top:1rem">✓ Operational</div>
+        </div>
+        <div class="stat-card">
+          <div style="color:var(--muted);font-size:0.85rem;text-transform:uppercase">XGBoost Accuracy</div>
+          <div class="stat-val" style="color:var(--cyan)">80.82%</div>
+        </div>
+      </div>
+      <div class="grid-3" style="grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 2rem;">
+        <div class="chart-container" style="margin-bottom:0;"><h3 style="margin-bottom:1rem">Diagnosis Distribution</h3><div style="height:250px"><canvas id="demoChart"></canvas></div></div>
+        <div class="chart-container" style="margin-bottom:0;"><h3 style="margin-bottom:1rem">Age Demographic Risk</h3><div style="height:250px"><canvas id="ageChart"></canvas></div></div>
+      </div>
+      <h3 style="margin-bottom:1rem">Past User Predictions</h3>
+      <table class="user-table">
+        <thead><tr><th>User</th><th>Method</th><th>Prediction</th><th>Confidence</th><th>Date</th></tr></thead>
+        <tbody id="stats-table"></tbody>
+      </table>
+    </div>
+
+    <!-- View: EEG Predictor -->
+    <div id="view-eeg" class="view">
+      <h1 class="view-title">EEG Analysis Suite</h1>
+      <div style="display:flex;gap:1rem;margin-bottom:2rem">
+        <button class="btn" style="width:auto" onclick="document.getElementById('m-csv').style.display='block';document.getElementById('m-bio').style.display='none'">CSV Upload</button>
+        <button class="btn" style="width:auto;background:var(--card);border:1px solid var(--border)" onclick="document.getElementById('m-csv').style.display='none';document.getElementById('m-bio').style.display='block'">Manual Biomarkers</button>
+      </div>
+
+      <div id="m-csv">
+        <div class="upload-zone" id="dz"><input type="file" style="position:absolute;inset:0;opacity:0" id="fileIn" accept=".csv" onchange="runCSV(this.files[0])"/><h2>Drop BRMH CSV here</h2><p>Auto-extracts FAA & Theta/Alpha ratio</p></div>
+        <div id="csv-res" style="margin-top:2rem;display:none">
+          <img id="csv-chart" style="width:100%;border-radius:16px;border:1px solid var(--border)"/>
+        </div>
+      </div>
+
+      <div id="m-bio" style="display:none">
+        <div class="sliders-grid" id="sl-grid"></div>
+        <button class="btn" onclick="runBio()">Run Biomarker Analysis (Logistic Regression)</button>
+        <div id="bio-res" class="info-card" style="margin-top:2rem;display:none;background:var(--card)">
+          <h2 id="br-title"></h2>
+          <p style="color:var(--muted);margin-top:0.5rem" id="br-conf"></p>
+          <div style="margin-top:1.5rem; height: 10px; border-radius: 5px; background: var(--panel); overflow: hidden; display: flex;">
+            <div id="bp-h" style="height: 100%; background: var(--emerald); width: 0%;"></div>
+            <div id="bp-m" style="height: 100%; background: var(--rose); width: 0%;"></div>
+          </div>
+          <div style="display: flex; justify-content: space-between; font-size:0.8rem; margin-top: 5px;">
+            <span style="color: var(--emerald)" id="bl-h">Healthy: 0%</span>
+            <span style="color: var(--rose)" id="bl-m">Mood Disorder: 0%</span>
+          </div>
+          <div style="margin-top:1.5rem;padding:1rem;background:rgba(255,255,255,0.02);border-radius:12px;border:1px solid var(--primary-glow);font-size:0.9rem" id="br-exp"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- View: AI Psychiatrist -->
+    <div id="view-chat" class="view">
+      <h1 class="view-title">AI Psychiatrist (Groq Llama 3)</h1>
+      <p style="color:var(--muted);margin-bottom:1.5rem">Ask Dr. NeuroScan about medications, therapies, or lifestyle adjustments.</p>
+      <div class="chat-container">
+        <div class="chat-box" id="cb">
+          <div class="chat-msg chat-ai">Hello! I am the AI Psychiatrist. Based on the recent scans or your queries, I can suggest medications or therapy strategies. How can I help you today?</div>
+        </div>
+        <div class="chat-input-area">
+          <input type="text" id="ci" placeholder="Ask about treatments or conditions..." onkeypress="if(event.key==='Enter') sendChat()"/>
+          <button class="btn" style="width:auto;padding:8px 16px" onclick="sendChat()">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- View: Cost -->
+    <div id="view-cost" class="view">
+      <h1 class="view-title">Therapy Cost Estimator</h1>
+      <div class="info-card">
+        <h3>Adjust Treatment Parameters</h3>
+        <div style="margin-top:2rem">
+          <label>Sessions per Month: <span id="s-val">4</span></label>
+          <input type="range" id="c-sess" min="0" max="12" value="4" oninput="calcCost()"/>
+        </div>
+        <div style="margin-top:1.5rem">
+          <label>Medication Tier ($): <span id="m-val">150</span> /mo</label>
+          <input type="range" id="c-meds" min="0" max="500" value="150" step="10" oninput="calcCost()"/>
+        </div>
+      </div>
+      <div class="info-card" style="text-align:center;background:linear-gradient(135deg,rgba(139,92,246,0.1),transparent);border-color:var(--primary)">
+        <h3 style="color:var(--muted)">Estimated Monthly Cost</h3>
+        <div style="font-size:4rem;font-weight:800;color:var(--cyan);margin:1rem 0" id="cost-total">$750</div>
+        <p style="font-size:0.85rem;color:var(--muted)">Based on $150/session avg + meds.</p>
+      </div>
+    </div>
+
+    <!-- View: ML -->
+    <div id="view-ml" class="view">
+      <h1 class="view-title">Behind the Model</h1>
+      <div class="grid-3" style="grid-template-columns:1fr 1fr;">
+        <div class="info-card">
+          <h3 style="color:var(--cyan);margin-bottom:1rem">Feature Engineering</h3>
+          <p style="color:var(--muted);line-height:1.6;font-size:0.95rem">We extract powerful clinical features from raw EEG channels:
+          <br><br><b>FAA (Frontal Alpha Asymmetry):</b> Difference in alpha power between left/right hemispheres. Negative FAA strongly links to depression.
+          <br><b>Theta/Alpha Ratio:</b> Indicator of cognitive fatigue common in mood disorders.</p>
+        </div>
+        <div class="info-card">
+          <h3 style="color:var(--primary);margin-bottom:1rem">XGBoost & Ensembles</h3>
+          <p style="color:var(--muted);line-height:1.6;font-size:0.95rem">Our pipeline uses a tuned XGBoost Classifier achieving 80.82% binary accuracy (Healthy vs Mood Disorder). Extreme Gradient Boosting builds sequential decision trees to minimize prediction error natively handling sparse matrixes.</p>
+        </div>
+      </div>
+      <div class="info-card">
+        <h3>Architecture Pipeline</h3>
+        <div style="padding:2rem;background:var(--card);border-radius:12px;margin-top:1rem;text-align:center;font-family:var(--font-mono);color:var(--cyan)">
+          Raw CSV ➔ Drop Metadata ➔ Impute Medians ➔ Extract FAA/Ratios ➔ StandardScaler ➔ VarianceThreshold ➔ XGBoost ➔ Softmax Probability
+        </div>
+      </div>
+    </div>
+
+    <!-- View: Research -->
+    <div id="view-research" class="view">
+      <h1 class="view-title">Clinical Research & Predictions</h1>
+      <p style="color:var(--muted); line-height:1.6; margin-bottom:2rem; max-width:800px; font-size:1.05rem;">
+        NeuroScan's prediction framework is fundamentally rooted in established psychiatric EEG literature. 
+        Research demonstrates that patients with Mood Disorders exhibit consistent deviations in Alpha, Beta, and Theta rhythms across the frontal and parietal lobes.
+      </p>
+
+      <div class="grid-3" style="grid-template-columns: 1fr 1fr; margin-bottom: 2rem;">
+        <div class="info-card" style="margin-bottom:0">
+          <h3 style="color:var(--cyan); margin-bottom:1rem">The Alpha Asymmetry Hypothesis</h3>
+          <p style="color:var(--muted); line-height:1.6; font-size:0.95rem;">
+            Frontal Alpha Asymmetry (FAA) is the golden standard biomarker for analyzing depressive behaviors. 
+            Greater relative right frontal activity (negative FAA) is consistently associated with 
+            withdrawal-oriented negative affect, anxiety, and clinical depression.
+          </p>
+        </div>
+        <div class="info-card" style="margin-bottom:0">
+          <h3 style="color:var(--primary); margin-bottom:1rem">Theta/Alpha Ratio</h3>
+          <p style="color:var(--muted); line-height:1.6; font-size:0.95rem;">
+            Cognitive fatigue—a core symptom of mood disorders—manifests as elevated Theta power and reduced Alpha power.
+            Our models weigh the Theta/Alpha ratio remarkably high, detecting early-stage cognitive decline linked to major depressive episodes.
+          </p>
+        </div>
+      </div>
+
+      <div class="grid-3" style="grid-template-columns: repeat(3, 1fr);">
+        <div class="info-card">
+          <h3 style="margin-bottom:1rem">Brainwave Profiling</h3>
+          <div style="height: 250px;"><canvas id="chartRadar"></canvas></div>
+        </div>
+        <div class="info-card">
+          <h3 style="margin-bottom:1rem">Feature Importance</h3>
+          <div style="height: 250px;"><canvas id="chartFeatureImp"></canvas></div>
+        </div>
+        <div class="info-card">
+          <h3 style="margin-bottom:1rem">Model ROC Curve</h3>
+          <div style="height: 250px;"><canvas id="chartRoc"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- View: Doctors -->
+    <div id="view-doctors" class="view">
+      <h1 style="margin-bottom: 2rem">Clinical Roster</h1>
+      <p style="color:var(--muted); margin-bottom: 2rem; font-size:1.1rem">Book a session with our highly-rated AI-assisted psychiatrists and therapists based on historical prediction outcomes.</p>
+      <div class="grid-3" id="docs-grid">
+         <!-- Populated via JS -->
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+let currentUser = null;
+let lastContext = "Healthy";
+let chartInst = null;
+let ageChartInst = null;
+let researchRendered = false;
+
+// Three.js Logic (Safe initialization)
+function init3D() {
+  const container = document.getElementById('three-container');
+  if(!container || container.clientWidth === 0) return;
+  
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera( 75, container.clientWidth / container.clientHeight, 0.1, 1000 );
+  camera.position.z = 120;
+  camera.position.x = 80;
+  camera.position.y = -20;
+  
+  const renderer = new THREE.WebGLRenderer({alpha:true, antialias:true});
+  renderer.setSize( container.clientWidth, container.clientHeight );
+  container.appendChild( renderer.domElement );
+  
+  const geometry = new THREE.BufferGeometry();
+  const vertices = [];
+  for ( let i = 0; i < 500; i ++ ) {
+    vertices.push( 180 * (Math.random() - 0.5), 180 * (Math.random() - 0.5), 180 * (Math.random() - 0.5) );
+  }
+  geometry.setAttribute( 'position', new THREE.Float32BufferAttribute( vertices, 3 ) );
+  
+  const material = new THREE.PointsMaterial({color: 0x06b6d4, size: 1.5, transparent: true, opacity: 0.8});
+  const particles = new THREE.Points( geometry, material );
+  scene.add( particles );
+  
+  const lineMaterial = new THREE.LineBasicMaterial({color: 0x8b5cf6, transparent: true, opacity: 0.15});
+  const lineGeometry = new THREE.BufferGeometry();
+  const lineVertices = [];
+  for(let i=0; i<800; i++){
+     const idx1 = Math.floor(Math.random()*499)*3;
+     const idx2 = Math.floor(Math.random()*499)*3;
+     lineVertices.push(vertices[idx1], vertices[idx1+1], vertices[idx1+2]);
+     lineVertices.push(vertices[idx2], vertices[idx2+1], vertices[idx2+2]);
+  }
+  lineGeometry.setAttribute('position', new THREE.Float32BufferAttribute(lineVertices, 3));
+  const lines = new THREE.LineSegments(lineGeometry, lineMaterial);
+  scene.add(lines);
+
+  let mouseX = 0, mouseY = 0;
+  document.addEventListener('mousemove', (e) => {
+    mouseX = (e.clientX - window.innerWidth / 2) * 0.1;
+    mouseY = (e.clientY - window.innerHeight / 2) * 0.1;
+  });
+
+  function animate() {
+    requestAnimationFrame( animate );
+    if (document.getElementById('view-home').classList.contains('active')) {
+       particles.rotation.x += 0.0005;
+       particles.rotation.y += 0.001;
+       lines.rotation.x += 0.0005;
+       lines.rotation.y += 0.001;
+       camera.position.x += ( 80 + mouseX - camera.position.x ) * .05;
+       camera.position.y += ( -20 - mouseY - camera.position.y ) * .05;
+       camera.lookAt( scene.position );
+       renderer.render( scene, camera );
+    }
+  }
+  animate();
+  
+  window.addEventListener('resize', () => {
+    camera.aspect = container.clientWidth / container.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(container.clientWidth, container.clientHeight);
+  });
+}
+
+// Routing
+function nav(viewId) {
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-'+viewId).classList.add('active');
+  event.currentTarget.classList.add('active');
+  if(viewId === 'dashboard') loadStats();
+  if(viewId === 'research' && !researchRendered) renderResearchCharts();
+  if(viewId === 'doctors') loadDoctors();
+}
+
+function renderResearchCharts() {
+  researchRendered = true;
+  
+  Chart.defaults.color = '#94a3b8';
+  Chart.defaults.font.family = "'Outfit', sans-serif";
+
+  new Chart(document.getElementById('chartRadar').getContext('2d'), {
+    type: 'radar',
+    data: {
+      labels: ['FAA', 'Theta Pwr', 'Beta/Alpha', 'Delta Asym', 'Alpha Pwr'],
+      datasets: [
+        { label: 'Healthy Baseline', data: [0.8, 0.4, 0.9, 0.3, 0.8], borderColor: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.2)', borderWidth: 2},
+        { label: 'Mood Disorder', data: [-0.6, 0.9, 0.4, 0.8, 0.3], borderColor: '#f43f5e', backgroundColor: 'rgba(244, 63, 94, 0.2)', borderWidth: 2}
+      ]
+    },
+    options: { responsive: true, maintainAspectRatio: false, scales: { r: { grid: { color: 'rgba(255,255,255,0.05)' }, angleLines: { color: 'rgba(255,255,255,0.05)' }, pointLabels: { font: {size: 10} }, ticks: { display:false, backdropColor: 'transparent' } } }, plugins: { tooltip: { mode: 'index', intersect: false } } }
+  });
+
+  new Chart(document.getElementById('chartFeatureImp').getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: ['FAA', 'Theta/Alpha', 'Beta/Alpha', 'Delta Asym', 'Mean Theta'],
+      datasets: [{
+        label: 'Importance Score',
+        data: [0.85, 0.72, 0.61, 0.45, 0.38],
+        backgroundColor: 'rgba(6, 182, 212, 0.8)',
+        borderRadius: 5
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, indexAxis: 'y', plugins:{legend:{display:false}, tooltip: { mode: 'index', intersect: false }}, scales:{x:{grid:{color:'rgba(255,255,255,0.05)'}},y:{grid:{display:false}}} }
+  });
+  
+  new Chart(document.getElementById('chartRoc').getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: ['0', '0.2', '0.4', '0.6', '0.8', '1.0'],
+      datasets: [{
+        label: 'XGBoost (AUC = 0.88)',
+        data: [0, 0.65, 0.82, 0.90, 0.96, 1.0],
+        borderColor: '#8b5cf6',
+        backgroundColor: 'rgba(139, 92, 246, 0.1)',
+        fill: true,
+        tension: 0.4,
+        pointBackgroundColor: '#fff', pointRadius: 4
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { tooltip: { mode: 'index', intersect: false } }, scales:{x:{grid:{color:'rgba(255,255,255,0.05)'}},y:{grid:{color:'rgba(255,255,255,0.05)'}}} }
+  });
+}
+
+// Sliders setup
+const SLIDERS = [
+  { key:"faa", label:"Frontal Alpha Asymmetry (FAA)", min:-2, max:2, step:0.01, def:0 },
+  { key:"theta_alpha", label:"Theta/Alpha Ratio", min:0, max:5, step:0.01, def:1.2 },
+  { key:"beta_alpha", label:"Beta/Alpha Ratio", min:0, max:5, step:0.01, def:1.0 },
+  { key:"delta_asym", label:"Delta Asymmetry", min:-3, max:3, step:0.01, def:0 },
+  { key:"alpha_power", label:"Mean Alpha Power", min:-3, max:3, step:0.01, def:0 },
+  { key:"theta_power", label:"Mean Theta Power", min:-3, max:3, step:0.01, def:0 }
+];
+const grid = document.getElementById("sl-grid");
+SLIDERS.forEach(s => {
+  grid.innerHTML += `<div class="slider-item">
+    <div style="display:flex;justify-content:space-between;font-size:0.85rem;color:var(--muted)">${s.label} <span id="v_${s.key}" style="color:var(--cyan)">${s.def}</span></div>
+    <input type="range" id="s_${s.key}" min="${s.min}" max="${s.max}" step="${s.step}" value="${s.def}" oninput="document.getElementById('v_${s.key}').innerText=this.value"/>
+  </div>`;
+});
+
+// Auth
+async function login() {
+  const u = document.getElementById('username').value;
+  const p = document.getElementById('password').value;
+  try {
+    let r = await fetch('/api/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u, password:p})});
+    let d = await r.json();
+    if(!r.ok) throw new Error(d.detail);
+    currentUser = d.username;
+    document.getElementById('userNameLabel').innerText = `@${currentUser}`;
+    document.getElementById('auth-screen').style.display = 'none';
+    document.getElementById('app').style.display = 'flex';
+    setTimeout(() => init3D(), 50); // Small 50ms delay to ensure browser layout engine computes flex sizes
+  } catch(e) { document.getElementById('auth-err').innerText = e.message; }
+}
+
+async function register() {
+  const u = document.getElementById('username').value;
+  const p = document.getElementById('password').value;
+  try {
+    let r = await fetch('/api/register', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u, password:p})});
+    let d = await r.json();
+    if(!r.ok) throw new Error(d.detail);
+    alert("Created! You can now log in.");
+  } catch(e) { document.getElementById('auth-err').innerText = e.message; }
+}
+
+// Chat
+async function sendChat() {
+  const inp = document.getElementById('ci');
+  const txt = inp.value; if(!txt) return;
+  inp.value = '';
+  const cb = document.getElementById('cb');
+  cb.innerHTML += `<div class="chat-msg chat-user">${txt}</div>`;
+  cb.scrollTo(0, 9999);
+  
+  try {
+    let r = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:txt, context:lastContext})});
+    let d = await r.json();
+    cb.innerHTML += `<div class="chat-msg chat-ai">${d.response}</div>`;
+    cb.scrollTo(0, 9999);
+  } catch(e) { alert("Chat Error"); }
+}
+
+// Cost
+function calcCost() {
+  const s = parseInt(document.getElementById('c-sess').value);
+  const m = parseInt(document.getElementById('c-meds').value);
+  document.getElementById('s-val').innerText = s;
+  document.getElementById('m-val').innerText = m;
+  document.getElementById('cost-total').innerText = '$' + (s * 150 + m);
+}
+
+// Dashboard
+async function loadStats() {
+  let r = await fetch('/api/stats');
+  let d = await r.json();
+  let html = '';
+  let healthy = 0, mood = 0;
+  document.getElementById('stat-scans').innerText = d.history.length;
+  
+  d.history.forEach(h => {
+    let badge = h.prediction.includes('Mood') ? 'Mood' : 'Healthy';
+    if(badge=='Healthy') healthy++; else mood++;
+    html += `<tr><td>@${h.username}</td><td>${h.type}</td><td><span class="badge ${badge}">${h.prediction}</span></td><td style="color:var(--cyan)">${h.confidence.toFixed(1)}%</td><td>${h.date.split(' ')[0]}</td></tr>`;
+  });
+  document.getElementById('stats-table').innerHTML = html;
+
+  if(chartInst) chartInst.destroy();
+  const ctx = document.getElementById('demoChart').getContext('2d');
+  chartInst = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: ['Healthy', 'Mood Disorder'],
+      datasets: [{
+        data: [healthy, mood],
+        backgroundColor: ['#10b981', '#f43f5e'],
+        borderWidth: 0, hoverOffset: 10
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins:{ tooltip:{mode:'index'}, legend:{position:'bottom', labels:{color:'#fff'}} }, cutout:'70%' }
+  });
+
+  if(ageChartInst) ageChartInst.destroy();
+  const ageCtx = document.getElementById('ageChart').getContext('2d');
+  ageChartInst = new Chart(ageCtx, {
+    type: 'bar',
+    data: {
+      labels: ['18-24', '25-34', '35-44', '45-54', '55+'],
+      datasets: [{
+        label: 'High Risk',
+        data: [15, 32, 28, 14, 11],
+        backgroundColor: '#f43f5e',
+        borderRadius: 4
+      }, {
+        label: 'Low Risk',
+        data: [45, 55, 30, 25, 22],
+        backgroundColor: '#10b981',
+        borderRadius: 4
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, scales:{x:{stacked:true, grid:{color:'rgba(255,255,255,0.05)'}},y:{stacked:true, grid:{color:'rgba(255,255,255,0.05)'}}}, plugins: { tooltip: { mode: 'index', intersect: false }, legend:{position:'bottom', labels:{color:'#fff'}} } }
+  });
+}
+
+// EEG
+async function runCSV(f) {
+  if(!f) return;
+  const fd = new FormData(); fd.append("file", f);
+  const r = await fetch('/predict-csv', {method:'POST', body:fd});
+  const d = await r.json();
+  document.getElementById('csv-chart').src = 'data:image/png;base64,' + d.dist_chart;
+  document.getElementById('csv-res').style.display = 'block';
+}
+
+async function runBio() {
+  let req = {};
+  SLIDERS.forEach(s => req[s.key] = parseFloat(document.getElementById('s_'+s.key).value));
+  const r = await fetch('/predict-biomarker', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(req)});
+  const d = await r.json();
+  let bad = d.prediction.includes('Mood');
+  document.getElementById('br-title').innerHTML = bad ? '🚨 Mood Disorder Detected' : '✅ Healthy Brain Patterns';
+  document.getElementById('br-title').style.color = bad ? 'var(--rose)' : 'var(--emerald)';
+  document.getElementById('br-conf').innerText = `Model: Logistic Regression | Confidence: ${d.confidence}%`;
+  
+  let p_health = d.probability["Healthy"] || 0;
+  let p_mood = d.probability["Mood Disorder"] || 0;
+  document.getElementById('bp-h').style.width = p_health + '%';
+  document.getElementById('bp-m').style.width = p_mood + '%';
+  document.getElementById('bl-h').innerText = 'Healthy: ' + p_health + '%';
+  document.getElementById('bl-m').innerText = 'Mood Disorder: ' + p_mood + '%';
+  
+  document.getElementById('br-exp').innerText = d.explanation;
+  document.getElementById('bio-res').style.display = 'block';
+  lastContext = d.prediction;
+}
+
+// Doctors
+async function loadDoctors() {
+  try {
+     let r = await fetch('/api/doctors');
+     let d = await r.json();
+     const container = document.getElementById('docs-grid');
+     container.innerHTML = '';
+     d.doctors.forEach(doc => {
+        container.innerHTML += `<div class="info-card" style="text-align:center; padding: 2.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; justify-content: space-between;">
+          <div>
+            <div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, var(--cyan), var(--primary)); margin: 0 auto 1.5rem; display: flex; align-items: center; justify-content: center; font-size: 2rem;">👤</div>
+            <h2 style="color:var(--cyan);margin-bottom:0.5rem; font-size:1.5rem;">${doc.name}</h2>
+            <p style="color:var(--muted);margin-bottom:1.5rem; font-size:0.9rem">${doc.specialty}</p>
+          </div>
+          <div style="width: 100%">
+            <div style="font-size:2.5rem;font-weight:800;color:#10b981; margin-bottom:0.5rem;">${doc.success_rate}%</div>
+            <div style="color:var(--muted);font-size:0.8rem;text-transform:uppercase;letter-spacing:1px;margin-bottom:1.5rem">Clinical Success</div>
+            <div style="margin-bottom:1.5rem; font-size:1.1rem; font-weight:600;">Session: <span style="color:#fff">$${doc.price}</span></div>
+            <button class="btn" style="width:100%" onclick="bookDoctor(${doc.id})">Book Session →</button>
+          </div>
+        </div>`;
+     });
+  } catch(e) { console.error(e); }
+}
+
+async function bookDoctor(id) {
+  try {
+     let r = await fetch('/api/book', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:currentUser, doctor_id:id})});
+     let d = await r.json();
+     alert(d.message);
+  } catch(e) { alert('Booking failed'); }
+}
+</script>
+</body>
+</html>
