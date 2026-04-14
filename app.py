@@ -24,7 +24,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-groq_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+# Use a dummy key to prevent immediate Uvicorn startup crash if Render Env Variables aren't set yet
+groq_client = Groq(api_key=os.getenv("GROQ_API_KEY", "dummy_key"))
 
 DB_NAME = "neuroscan.db"
 
@@ -78,7 +79,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.middleware import SlowAPIMiddleware
 from fastapi import Request
-import magic
+import filetype
 import logging
 
 limiter = Limiter(key_func=get_remote_address)
@@ -278,9 +279,10 @@ async def predict_csv(request: Request, file: UploadFile = File(...)):
     if len(contents) > 5 * 1024 * 1024:
         raise HTTPException(413, "File too large. Maximum 5MB.")
         
-    # MIME Validation via python-magic to ensure true file type
-    mime = magic.from_buffer(contents[:1024], mime=True)
-    if mime not in ["text/plain", "text/csv", "application/csv"]:
+    # MIME Validation via filetype (Pure Python, cloud safe)
+    kind = filetype.guess(contents[:1024])
+    # filetype returns None for plain text/csv since it only tracks binary magic signatures
+    if kind is not None and kind.mime not in ["text/plain", "text/csv", "application/csv"]:
         raise HTTPException(400, "Invalid file format detected.")
 
     try:
