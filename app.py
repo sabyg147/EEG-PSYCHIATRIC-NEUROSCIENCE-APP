@@ -1,10 +1,6 @@
-# HOT RELOAD TRIGGER
+# HOT RELOAD TRIGGER 
 import io, base64, warnings
 import os
-os.environ["MPLCONFIGDIR"] = "/tmp/matplotlib"
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import joblib, pickle
@@ -143,12 +139,9 @@ class BookDoctorInput(BaseModel):
     username: str
     doctor_id: int
 
-def fig_to_b64(fig) -> str:
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=120, bbox_inches="tight")
-    buf.seek(0)
-    plt.close(fig)
-    return base64.b64encode(buf.read()).decode()
+def fig_to_b64() -> str:
+    # Deprecated: Frontend handles charting now to save backend RAM
+    return ""
 
 def engineer_eeg_features(df: pd.DataFrame) -> pd.DataFrame:
     X_raw = df.copy()
@@ -302,15 +295,10 @@ async def predict_csv(request: Request, file: UploadFile = File(...)):
         pred_labels = [CLASSES[p] for p in preds]
         confidences = (probs.max(axis=1) * 100).tolist()
         dist = Counter(pred_labels)
-        fig, ax = plt.subplots(figsize=(8, 4))
-        colors = ["#4ADE80" if k == "Healthy" else "#F87171" for k in dist.keys()]
-        bars = ax.bar(dist.keys(), dist.values(), color=colors)
-        ax.bar_label(bars, padding=3)
-        ax.set_title("Predicted Class Distribution", fontsize=13)
-        ax.set_ylabel("Count")
-        ax.grid(axis="y", alpha=0.3)
-        plt.tight_layout()
-        chart_b64 = fig_to_b64(fig)
+        
+        # Backend Plotting Disabled to prevent OOM Font Cache crashes.
+        # Frontend Chart.js handles visualization.
+        chart_b64 = ""
         return JSONResponse({"n_samples": len(preds), "predictions": pred_labels, "confidences": confidences, "distribution": dict(dist), "dist_chart": chart_b64, "model_used": "XGBoost (full EEG features)", "threshold": THRESHOLD})
     except Exception as e:
         # Secure Error Logging: Log internally, generic HTTP message to prevent data leakage
