@@ -1,5 +1,10 @@
 # HOT RELOAD TRIGGER
 import io, base64, warnings
+import os
+os.environ["MPLCONFIGDIR"] = "/tmp/matplotlib"
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import joblib, pickle
