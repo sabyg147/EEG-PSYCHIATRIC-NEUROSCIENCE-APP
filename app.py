@@ -374,10 +374,12 @@ try:
         return {"message": f"Successfully booked consultation! A calendar invite has been sent."}
     
 except Exception as e:
-    print(f'!!! CRITICAL FATAL ERROR: {e} !!!', flush=True)
+    err_text = str(e)
+    import traceback
+    print(f'!!! CRITICAL FATAL ERROR: {err_text} !!!', flush=True)
     traceback.print_exc(file=sys.stdout)
     sys.stdout.flush()
     from fastapi import FastAPI
     app = FastAPI()
     @app.get('/')
-    def fail(): return {'status': 'CRASH_HANDLER_ACTIVE', 'error': str(e)}
+    def fail(): return {'status': 'CRASH_HANDLER_ACTIVE', 'error': err_text}
