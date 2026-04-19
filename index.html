@@ -190,6 +190,7 @@ input[type=range] { width: 100%; accent-color: var(--cyan); margin-top: 1rem; }
       </div>
 
       <div id="m-csv">
+        <div class="upload-zone" id="dz"><input type="file" style="position:absolute;inset:0;opacity:0" id="fileIn" accept=".csv" onchange="runCSV(this.files[0])"/><h2>Drop BRMH CSV here</h2><p>Auto-extracts FAA & Theta/Alpha ratio</p></div>
         <div id="csv-res" style="margin-top:2rem;display:none;background:var(--panel);padding:2rem;border-radius:16px;border:1px solid var(--border)">
           <h2 id="csv-title" style="margin-bottom:1rem">Analysis Results</h2>
           <div style="display:flex;gap:2rem">
