@@ -71,7 +71,7 @@ def init_db():
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT UNIQUE, password TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS predictions (id INTEGER PRIMARY KEY, user_id INTEGER, type TEXT, prediction TEXT, confidence REAL, date TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS doctors (id INTEGER PRIMARY KEY, name TEXT, specialty TEXT, success_rate REAL, price INTEGER)''')
+
     
     c.execute("SELECT COUNT(*) FROM users")
     if c.fetchone()[0] == 0:
@@ -94,16 +94,7 @@ def init_db():
         c.execute("INSERT INTO predictions (user_id, type, prediction, confidence, date) VALUES (4, 'EEG CSV', 'Healthy', 82.4, ?)", (now,))
         c.execute("INSERT INTO predictions (user_id, type, prediction, confidence, date) VALUES (5, 'Biomarker', 'Mood Disorder', 76.5, ?)", (now,))
         
-        # Seed Mock Doctors
-        docs = [
-            ("Dr. Evelyn Vance", "Cognitive Behavioral Therapy", 94.2, 120),
-            ("Dr. Arthur Sterling", "Neuro-Linguistic Programming", 88.5, 95),
-            ("Dr. Lisa Monroe", "Psychodynamic Regression", 91.0, 150),
-            ("Dr. Marcus Chen", "Holistic EEG Mediation", 98.1, 200),
-            ("Dr. Samuel Vane", "Somatic Experiencing", 85.3, 80)
-        ]
-        for name, spec, sr, price in docs:
-            c.execute("INSERT INTO doctors (name, specialty, success_rate, price) VALUES (?, ?, ?, ?)", (name, spec, sr, price))
+
 
     conn.commit()
     conn.close()
@@ -149,9 +140,7 @@ class PredictionResponse(BaseModel):
     probability: dict
     explanation: str
 
-class BookDoctorInput(BaseModel):
-    username: str
-    doctor_id: int
+
 
 def fig_to_b64() -> str:
     # Deprecated: Frontend handles charting now to save backend RAM
@@ -357,16 +346,4 @@ async def chat_api(data: ChatInput):
     except Exception as e:
         return {"response": f"Clinical Database Offline: {str(e)}"}
 
-@app.get("/api/doctors")
-def get_doctors():
-    conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    c.execute("SELECT * FROM doctors")
-    docs = [dict(row) for row in c.fetchall()]
-    conn.close()
-    return {"doctors": docs}
 
-@app.post("/api/book")
-def book_doctor(data: BookDoctorInput):
-    return {"message": f"Successfully booked consultation! A calendar invite has been sent."}

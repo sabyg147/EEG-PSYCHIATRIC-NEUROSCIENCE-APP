@@ -130,7 +130,6 @@ input[type=range] { width: 100%; accent-color: var(--cyan); margin-top: 1rem; }
       <div class="nav-item" onclick="nav('cost')">💳 Therapy Cost</div>
       <div class="nav-item" onclick="nav('ml')">🔬 ML Concepts</div>
       <div class="nav-item" onclick="nav('research')">🧬 Clinical Research</div>
-      <div class="nav-item" onclick="nav('doctors')">👨‍⚕️ Book Therapist</div>
     </nav>
     <div class="user-profile">
       <div class="avatar">👤</div>
@@ -191,9 +190,18 @@ input[type=range] { width: 100%; accent-color: var(--cyan); margin-top: 1rem; }
       </div>
 
       <div id="m-csv">
-        <div class="upload-zone" id="dz"><input type="file" style="position:absolute;inset:0;opacity:0" id="fileIn" accept=".csv" onchange="runCSV(this.files[0])"/><h2>Drop BRMH CSV here</h2><p>Auto-extracts FAA & Theta/Alpha ratio</p></div>
-        <div id="csv-res" style="margin-top:2rem;display:none">
-          <img id="csv-chart" style="width:100%;border-radius:16px;border:1px solid var(--border)"/>
+        <div id="csv-res" style="margin-top:2rem;display:none;background:var(--panel);padding:2rem;border-radius:16px;border:1px solid var(--border)">
+          <h2 id="csv-title" style="margin-bottom:1rem">Analysis Results</h2>
+          <div style="display:flex;gap:2rem">
+            <div style="flex:1">
+               <p style="color:var(--muted);margin-bottom:0.5rem">Samples Processed: <strong id="csv-samples" style="color:var(--text)">0</strong></p>
+               <p style="color:var(--muted);margin-bottom:0.5rem">Model Used: <strong id="csv-model" style="color:var(--text)"></strong></p>
+               <div id="csv-dist" style="margin-top:1.5rem"></div>
+            </div>
+            <div style="flex:1; height: 200px">
+              <canvas id="csvCanvas"></canvas>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -317,15 +325,6 @@ input[type=range] { width: 100%; accent-color: var(--cyan); margin-top: 1rem; }
       </div>
     </div>
 
-    <!-- View: Doctors -->
-    <div id="view-doctors" class="view">
-      <h1 style="margin-bottom: 2rem">Clinical Roster</h1>
-      <p style="color:var(--muted); margin-bottom: 2rem; font-size:1.1rem">Book a session with our highly-rated AI-assisted psychiatrists and therapists based on historical prediction outcomes.</p>
-      <div class="grid-3" id="docs-grid">
-         <!-- Populated via JS -->
-      </div>
-    </div>
-
   </main>
 </div>
 
@@ -411,7 +410,6 @@ function nav(viewId) {
   event.currentTarget.classList.add('active');
   if(viewId === 'dashboard') loadStats();
   if(viewId === 'research' && !researchRendered) renderResearchCharts();
-  if(viewId === 'doctors') loadDoctors();
 }
 
 function renderResearchCharts() {
@@ -587,13 +585,48 @@ async function loadStats() {
 }
 
 // EEG
+let csvChartInst = null;
 async function runCSV(f) {
   if(!f) return;
   const fd = new FormData(); fd.append("file", f);
   const r = await fetch('/predict-csv', {method:'POST', body:fd});
+  if(!r.ok) {
+    let err = await r.json();
+    alert("Failed to process CSV: " + (err.detail || "Unknown error"));
+    return;
+  }
   const d = await r.json();
-  document.getElementById('csv-chart').src = 'data:image/png;base64,' + d.dist_chart;
+  
+  document.getElementById('csv-samples').innerText = d.n_samples;
+  document.getElementById('csv-model').innerText = d.model_used;
+  
+  let distHtml = "";
+  let labels = [];
+  let counts = [];
+  let colors = [];
+  for (let key in d.distribution) {
+    distHtml += `<p style="margin-bottom:0.5rem;font-weight:bold;color:${key==='Healthy'?'var(--emerald)':'var(--rose)'}">${key}: ${d.distribution[key]}</p>`;
+    labels.push(key);
+    counts.push(d.distribution[key]);
+    colors.push(key==='Healthy' ? '#10b981' : '#f43f5e');
+  }
+  document.getElementById('csv-dist').innerHTML = distHtml;
   document.getElementById('csv-res').style.display = 'block';
+  
+  if(csvChartInst) csvChartInst.destroy();
+  const ctx = document.getElementById('csvCanvas').getContext('2d');
+  csvChartInst = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: labels,
+      datasets: [{
+        data: counts,
+        backgroundColor: colors,
+        borderWidth: 0, hoverOffset: 10
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: {color:'#fff'} } }, cutout:'60%' }
+  });
 }
 
 async function runBio() {
@@ -618,38 +651,7 @@ async function runBio() {
   lastContext = d.prediction;
 }
 
-// Doctors
-async function loadDoctors() {
-  try {
-     let r = await fetch('/api/doctors');
-     let d = await r.json();
-     const container = document.getElementById('docs-grid');
-     container.innerHTML = '';
-     d.doctors.forEach(doc => {
-        container.innerHTML += `<div class="info-card" style="text-align:center; padding: 2.5rem 1.5rem; display: flex; flex-direction: column; align-items: center; justify-content: space-between;">
-          <div>
-            <div style="width: 80px; height: 80px; border-radius: 50%; background: linear-gradient(135deg, var(--cyan), var(--primary)); margin: 0 auto 1.5rem; display: flex; align-items: center; justify-content: center; font-size: 2rem;">👤</div>
-            <h2 style="color:var(--cyan);margin-bottom:0.5rem; font-size:1.5rem;">${doc.name}</h2>
-            <p style="color:var(--muted);margin-bottom:1.5rem; font-size:0.9rem">${doc.specialty}</p>
-          </div>
-          <div style="width: 100%">
-            <div style="font-size:2.5rem;font-weight:800;color:#10b981; margin-bottom:0.5rem;">${doc.success_rate}%</div>
-            <div style="color:var(--muted);font-size:0.8rem;text-transform:uppercase;letter-spacing:1px;margin-bottom:1.5rem">Clinical Success</div>
-            <div style="margin-bottom:1.5rem; font-size:1.1rem; font-weight:600;">Session: <span style="color:#fff">$${doc.price}</span></div>
-            <button class="btn" style="width:100%" onclick="bookDoctor(${doc.id})">Book Session →</button>
-          </div>
-        </div>`;
-     });
-  } catch(e) { console.error(e); }
-}
 
-async function bookDoctor(id) {
-  try {
-     let r = await fetch('/api/book', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:currentUser, doctor_id:id})});
-     let d = await r.json();
-     alert(d.message);
-  } catch(e) { alert('Booking failed'); }
-}
 </script>
 </body>
 </html>
