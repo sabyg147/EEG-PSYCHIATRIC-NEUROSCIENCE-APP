@@ -106,6 +106,7 @@ input[type=range] { width: 100%; accent-color: var(--cyan); margin-top: 1rem; }
     <h2 style="margin-bottom:0.5rem">NeuroScan Access</h2>
     <p style="color:var(--muted);margin-bottom:2rem;font-size:0.9rem">Login or create an account</p>
     <input type="text" id="username" class="auth-input" placeholder="Username (e.g., jake)"/>
+    <input type="email" id="email" class="auth-input" placeholder="Email (For Registration only)"/>
     <input type="password" id="password" class="auth-input" placeholder="Password"/>
     <div style="display:flex;gap:10px;">
       <button class="btn" onclick="login()" style="background:var(--card);border:1px solid var(--cyan);color:var(--cyan);box-shadow:none">Log In</button>
@@ -331,10 +332,22 @@ input[type=range] { width: 100%; accent-color: var(--cyan); margin-top: 1rem; }
 
 <script>
 let currentUser = null;
+let authToken = localStorage.getItem('neuroscan_token');
 let lastContext = "Healthy";
 let chartInst = null;
 let ageChartInst = null;
 let researchRendered = false;
+
+function getAuthHeaders() {
+  return { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` };
+}
+function handleAuthErr(r) {
+  if(r.status === 401) {
+    alert("Session expired. Please log in again.");
+    localStorage.removeItem('neuroscan_token');
+    location.reload();
+  }
+}
 
 // Three.js Logic (Safe initialization)
 function init3D() {
@@ -489,6 +502,8 @@ async function login() {
     let d = await r.json();
     if(!r.ok) throw new Error(d.detail);
     currentUser = d.username;
+    authToken = d.access_token;
+    localStorage.setItem('neuroscan_token', authToken);
     document.getElementById('userNameLabel').innerText = `@${currentUser}`;
     document.getElementById('auth-screen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
@@ -498,12 +513,14 @@ async function login() {
 
 async function register() {
   const u = document.getElementById('username').value;
+  const e = document.getElementById('email').value;
   const p = document.getElementById('password').value;
+  if(!e) { document.getElementById('auth-err').innerText = "Email is required for registration."; return; }
   try {
-    let r = await fetch('/api/register', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u, password:p})});
+    let r = await fetch('/api/register', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u, email:e, password:p})});
     let d = await r.json();
     if(!r.ok) throw new Error(d.detail);
-    alert("Created! You can now log in.");
+    alert("Created! Check server logs for simulated verification email. You can now log in.");
   } catch(e) { document.getElementById('auth-err').innerText = e.message; }
 }
 
@@ -517,7 +534,8 @@ async function sendChat() {
   cb.scrollTo(0, 9999);
   
   try {
-    let r = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:txt, context:lastContext})});
+    let r = await fetch('/api/chat', {method:'POST', headers:getAuthHeaders(), body:JSON.stringify({message:txt, context:lastContext})});
+    handleAuthErr(r);
     let d = await r.json();
     cb.innerHTML += `<div class="chat-msg chat-ai">${d.response}</div>`;
     cb.scrollTo(0, 9999);
@@ -535,7 +553,9 @@ function calcCost() {
 
 // Dashboard
 async function loadStats() {
-  let r = await fetch('/api/stats');
+  if(!authToken) return;
+  let r = await fetch('/api/stats', { headers: { 'Authorization': `Bearer ${authToken}` } });
+  handleAuthErr(r);
   let d = await r.json();
   let html = '';
   let healthy = 0, mood = 0;
@@ -590,7 +610,8 @@ let csvChartInst = null;
 async function runCSV(f) {
   if(!f) return;
   const fd = new FormData(); fd.append("file", f);
-  const r = await fetch('/predict-csv', {method:'POST', body:fd});
+  const r = await fetch('/predict-csv', {method:'POST', headers:{'Authorization': `Bearer ${authToken}`}, body:fd});
+  handleAuthErr(r);
   if(!r.ok) {
     let err = await r.json();
     alert("Failed to process CSV: " + (err.detail || "Unknown error"));
@@ -633,7 +654,9 @@ async function runCSV(f) {
 async function runBio() {
   let req = {};
   SLIDERS.forEach(s => req[s.key] = parseFloat(document.getElementById('s_'+s.key).value));
-  const r = await fetch('/predict-biomarker', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(req)});
+  const r = await fetch('/predict-biomarker', {method:'POST', headers:getAuthHeaders(), body:JSON.stringify(req)});
+  handleAuthErr(r);
+  if(!r.ok) { alert("Analysis failed."); return; }
   const d = await r.json();
   let bad = d.prediction.includes('Mood');
   document.getElementById('br-title').innerHTML = bad ? '🚨 Mood Disorder Detected' : '✅ Healthy Brain Patterns';

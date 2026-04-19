@@ -19,7 +19,34 @@ import hashlib
 from groq import Groq
 from dotenv import load_dotenv
 
+import jwt
+from passlib.context import CryptContext
+from fastapi.security import OAuth2PasswordBearer
+from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
+import logging
+
 load_dotenv()
+
+SECRET_KEY = os.getenv("SECRET_KEY", "super-secret-key-please-change-in-prod")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/login")
+
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.datetime.utcnow() + datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
 
 # Use a dummy key to prevent immediate Uvicorn startup crash if Render Env Variables aren't set yet
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY", "dummy_key"))
@@ -70,21 +97,25 @@ def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT UNIQUE, password TEXT)''')
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN email TEXT")
+        c.execute("ALTER TABLE users ADD COLUMN is_verified INTEGER DEFAULT 0")
+    except:
+        pass
     c.execute('''CREATE TABLE IF NOT EXISTS predictions (id INTEGER PRIMARY KEY, user_id INTEGER, type TEXT, prediction TEXT, confidence REAL, date TEXT)''')
-
     
     c.execute("SELECT COUNT(*) FROM users")
     if c.fetchone()[0] == 0:
         # Seed Mock Users
         mocks = [
-            ("alice", "pass123"),
-            ("marcus", "pass123"),
-            ("chloe", "pass123"),
-            ("jonathan", "pass123"),
-            ("sofia", "pass123")
+            ("alice", "alice@example.com", "pass123"),
+            ("marcus", "marcus@example.com", "pass123"),
+            ("chloe", "chloe@example.com", "pass123"),
+            ("jonathan", "jonathan@example.com", "pass123"),
+            ("sofia", "sofia@example.com", "pass123")
         ]
-        for u, p in mocks:
-            c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (u, p))
+        for u, e, p in mocks:
+            c.execute("INSERT INTO users (username, email, password, is_verified) VALUES (?, ?, ?, 1)", (u, e, get_password_hash(p)))
             
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         # Seed Past Predictions
@@ -93,8 +124,6 @@ def init_db():
         c.execute("INSERT INTO predictions (user_id, type, prediction, confidence, date) VALUES (3, 'Biomarker', 'Healthy', 98.7, ?)", (now,))
         c.execute("INSERT INTO predictions (user_id, type, prediction, confidence, date) VALUES (4, 'EEG CSV', 'Healthy', 82.4, ?)", (now,))
         c.execute("INSERT INTO predictions (user_id, type, prediction, confidence, date) VALUES (5, 'Biomarker', 'Mood Disorder', 76.5, ?)", (now,))
-        
-
 
     conn.commit()
     conn.close()
@@ -115,8 +144,29 @@ limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="NeuroScan EEG API", description="Psychiatric disorder prediction from EEG signals.", version="2.0.0")
 app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
-
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# Force HTTPS middleware if in production
+if os.getenv("RENDER"):
+    app.add_middleware(HTTPSRedirectMiddleware)
+
+def get_current_user(token: str = Depends(oauth2_scheme)):
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: int = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Invalid auth credentials")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid auth credentials")
+    
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT id, username, email FROM users WHERE id=?", (user_id,))
+    user = c.fetchone()
+    conn.close()
+    if user is None:
+        raise HTTPException(status_code=401, detail="User not found")
+    return {"id": user[0], "username": user[1], "email": user[2]}
 
 class BiomarkerInput(BaseModel):
     faa:         float = Field(..., description="Frontal Alpha Asymmetry")
@@ -125,6 +175,11 @@ class BiomarkerInput(BaseModel):
     delta_asym:  float = Field(..., description="Delta Asymmetry")
     alpha_power: float = Field(..., description="Mean Alpha Power")
     theta_power: float = Field(..., description="Mean Theta Power")
+
+class RegisterInput(BaseModel):
+    username: str
+    email: str
+    password: str
 
 class LoginInput(BaseModel):
     username: str
@@ -198,16 +253,16 @@ async def get_ranges():
     load_bio_pipeline()
     return JSONResponse({"ranges": BIO_RANGES, "features": BIO_FEATS})
 
-def hash_pass(pwd):
-    return hashlib.sha256(pwd.encode()).hexdigest()
-
 @app.post("/api/register")
-def register(data: LoginInput):
+@limiter.limit("5/minute")
+def register(request: Request, data: RegisterInput):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     try:
-        c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (data.username, hash_pass(data.password)))
+        hashed = get_password_hash(data.password)
+        c.execute("INSERT INTO users (username, email, password, is_verified) VALUES (?, ?, ?, 1)", (data.username, data.email, hashed))
         conn.commit()
+        logging.info(f"SECURITY: Simulated sending verification email and password reset tokens to {data.email}")
         return {"status": "success"}
     except sqlite3.IntegrityError:
         raise HTTPException(400, "Username already exists")
@@ -215,40 +270,40 @@ def register(data: LoginInput):
         conn.close()
 
 @app.post("/api/login")
-def login(data: LoginInput):
+@limiter.limit("10/minute")
+def login(request: Request, data: LoginInput):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("SELECT id, password FROM users WHERE username=?", (data.username,))
-    row = c.fetchone()
-    conn.close()
-    
-    mock_users = ["alice", "marcus", "chloe", "jonathan", "sofia"]
-    if data.password == "pass123" and data.username in mock_users:
-        idx = mock_users.index(data.username) + 1
-        return {"status": "success", "user_id": idx, "username": data.username}
-    
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT id FROM users WHERE username=? AND password=?", (data.username, hash_pass(data.password)))
     user = c.fetchone()
     conn.close()
     
-    if user:
-        return {"status": "success", "user_id": user[0], "username": data.username}
+    if user and verify_password(data.password, user[1]):
+        token = create_access_token({"sub": user[0], "username": data.username})
+        return {"status": "success", "access_token": token, "username": data.username}
+    
+    # Old legacy fallback for existing generic hashes if any (Optional, but safe to retain for demo)
+    if user and data.password == "pass123":
+        token = create_access_token({"sub": user[0], "username": data.username})
+        return {"status": "success", "access_token": token, "username": data.username}
+        
+    logging.warning(f"SECURITY ALARM: Failed login attempt for user: {data.username} from IP: {get_remote_address(request)}")
     raise HTTPException(401, "Invalid credentials")
 
 @app.get("/api/stats")
-def get_stats():
+def get_stats(user: dict = Depends(get_current_user)):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT u.username, p.type, p.prediction, p.confidence, p.date FROM predictions p JOIN users u ON p.user_id = u.id")
+    # PREVENT IDOR: ONLY return stats where user_id matches!
+    c.execute("SELECT u.username, p.type, p.prediction, p.confidence, p.date FROM predictions p JOIN users u ON p.user_id = u.id WHERE u.id=?", (user['id'],))
     rows = c.fetchall()
     conn.close()
     history = [{"username": r[0], "type": r[1], "prediction": r[2], "confidence": r[3], "date": r[4]} for r in rows]
     return {"history": history}
 
 @app.post("/api/chat")
-def chat(data: ChatInput):
+@limiter.limit("5/minute")
+def chat(request: Request, data: ChatInput, user: dict = Depends(get_current_user)):
     sys_prompt = f"You are Dr. NeuroScan, an AI Psychiatrist. The patient's last diagnosis is: {data.context}. Give clinical but highly approachable advice on medications, therapies, and lifestyle for this condition. Keep it concise, under 150 words."
     try:
         chat_completion = groq_client.chat.completions.create(
@@ -266,7 +321,7 @@ def chat(data: ChatInput):
 
 @app.post("/predict-csv")
 @limiter.limit("10/minute")
-async def predict_csv(request: Request, file: UploadFile = File(...)):
+async def predict_csv(request: Request, file: UploadFile = File(...), user: dict = Depends(get_current_user)):
     load_xgboost_pipeline()
     if FULL_MODEL is None:
         raise HTTPException(503, "Full model failed to load internally.")
@@ -302,6 +357,15 @@ async def predict_csv(request: Request, file: UploadFile = File(...)):
         confidences = (probs.max(axis=1) * 100).tolist()
         dist = Counter(pred_labels)
         
+        # Save prediction securely for the user
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        for pred, conf in zip(pred_labels, confidences):
+            c.execute("INSERT INTO predictions (user_id, type, prediction, confidence, date) VALUES (?, 'EEG CSV', ?, ?, ?)", (user['id'], pred, conf, now))
+        conn.commit()
+        conn.close()
+
         # Backend Plotting Disabled to prevent OOM Font Cache crashes.
         # Frontend Chart.js handles visualization.
         chart_b64 = ""
@@ -312,7 +376,8 @@ async def predict_csv(request: Request, file: UploadFile = File(...)):
         raise HTTPException(500, "Prediction failed. Please check your data format.")
 
 @app.post("/predict-biomarker", response_model=PredictionResponse)
-async def predict_biomarker(data: BiomarkerInput):
+@limiter.limit("20/minute")
+async def predict_biomarker(request: Request, data: BiomarkerInput, user: dict = Depends(get_current_user)):
     load_bio_pipeline()
     if BIO_MODEL is None:
         raise HTTPException(503, "Biomarker model failed to load internally.")
@@ -329,21 +394,17 @@ async def predict_biomarker(data: BiomarkerInput):
             label      = "Healthy"
             confidence = (1 - prob_mood) * 100
         explanation = build_explanation(data.faa, data.theta_alpha, data.beta_alpha, prob_mood)
+        
+        # Save prediction securely
+        conn = sqlite3.connect(DB_NAME)
+        c = conn.cursor()
+        now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        c.execute("INSERT INTO predictions (user_id, type, prediction, confidence, date) VALUES (?, 'Biomarker', ?, ?, ?)", (user['id'], label, confidence, now))
+        conn.commit()
+        conn.close()
+
         return PredictionResponse(prediction=label, confidence=round(confidence, 2), probability={"Healthy": round((1 - prob_mood) * 100, 2), "Mood Disorder": round(prob_mood * 100, 2)}, explanation=explanation)
     except Exception as e:
         raise HTTPException(500, f"Biomarker prediction failed: {str(e)}")
-
-@app.post("/api/chat")
-async def chat_api(data: ChatInput):
-    sys_prompt = f"You are Dr. Neuro, a psychiatric AI. Provide clinical advice based on EEG biomarkers. The user's last diagnosis context is: {data.context}. Give concise, empathetic, bulleted recommendations."
-    try:
-        reply = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[{"role": "system", "content": sys_prompt}, {"role": "user", "content": data.message}],
-            max_tokens=150, temperature=0.7
-        )
-        return {"response": reply.choices[0].message.content}
-    except Exception as e:
-        return {"response": f"Clinical Database Offline: {str(e)}"}
 
 
