@@ -330,9 +330,9 @@ async def predict_csv(request: Request, file: UploadFile = File(...), user: dict
     
     contents = await file.read()
     
-    # File Size limit: max 5MB
-    if len(contents) > 5 * 1024 * 1024:
-        raise HTTPException(413, "File too large. Maximum 5MB.")
+    # File Size limit: max 50MB
+    if len(contents) > 50 * 1024 * 1024:
+        raise HTTPException(413, "File too large. Maximum 50MB.")
         
     # MIME Validation via filetype (Pure Python, cloud safe)
     kind = filetype.guess(contents[:1024])
