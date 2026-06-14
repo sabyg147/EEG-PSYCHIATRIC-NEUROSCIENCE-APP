@@ -10,14 +10,12 @@
 ---
 
 ## 🌐 Live Demo
-👉 https://your-app-name.onrender.com  
-*(Replace this with your deployed link)*
+👉 https://eeg-neuroscan.onrender.com/
+
 
 ---
 
 ## 📸 Demo Preview
-
-![App Screenshot](https://via.placeholder.com/1000x500.png?text=NeuroScan+Demo)
 
 ---
 
